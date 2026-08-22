@@ -1,5 +1,5 @@
 // ============================================
-// NIRMANMITRA - EMAIL TRANSPORTER (FIXED FOR RENDER)
+// NIRMANMITRA - EMAIL TRANSPORTER (FORCE IPV4)
 // ============================================
 
 const nodemailer = require('nodemailer');
@@ -10,12 +10,12 @@ const sendEmail = async (options) => {
     return;
   }
 
-  // Gmail SMTP Transport with TLS (Render Compatible)
+  // Gmail SMTP with explicit IPv4 family
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
     host: 'smtp.gmail.com',
     port: 587,
-    secure: false, // Port 587 uses STARTTLS
+    secure: false, // STARTTLS
+    family: 4,     // <--- FORCE IPV4 (Fixes ENETUNREACH on Render)
     auth: {
       user: process.env.EMAIL_USER.trim(),
       pass: process.env.EMAIL_PASS.replace(/\s+/g, '').trim()
@@ -26,7 +26,7 @@ const sendEmail = async (options) => {
   });
 
   const mailOptions = {
-    from: `"NirmanMitra" <${process.env.EMAIL_USER.trim()}>`,
+    from: `"NirmanMitra Support" <${process.env.EMAIL_USER.trim()}>`,
     to: options.email,
     subject: options.subject,
     html: `
@@ -36,13 +36,13 @@ const sendEmail = async (options) => {
         <div style="background: #F4F5F7; padding: 16px; font-size: 28px; font-weight: bold; letter-spacing: 6px; text-align: center; border-radius: 8px; color: #111; margin: 20px 0;">
           ${options.otp}
         </div>
-        <p style="color: #888; font-size: 12px; margin-top: 15px;">This OTP is valid for 10 minutes. Never share this code with anyone.</p>
+        <p style="color: #888; font-size: 12px; margin-top: 15px;">This OTP is valid for 10 minutes. Do not share it with anyone.</p>
       </div>
     `
   };
 
   const info = await transporter.sendMail(mailOptions);
-  console.log('✅ Email sent successfully! MessageId:', info.messageId);
+  console.log('✅ Email sent successfully! ID:', info.messageId);
 };
 
 module.exports = sendEmail;
