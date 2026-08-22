@@ -1,24 +1,21 @@
 // ============================================
-// NIRMANMITRA - AUTH CONTROLLER WITH OTP FLOW
+// NIRMANMITRA - AUTH CONTROLLER (EMAIL + SMS OTP)
 // ============================================
 
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const sendEmail = require('../utils/sendEmail');
+const sendSMS = require('../utils/sendSMS');
 
-// Helper to generate 6 digit numeric OTP
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
-// Helper to generate JWT Token
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: '30d'
   });
 };
 
-// @desc    Register user & send verification OTP
-// @route   POST /api/auth/register
-// @access  Public
+// 1. REGISTER: Send OTP to Email & Phone
 exports.registerUser = async (req, res) => {
   try {
     const { name, email, password, phone, role, storeName, vehicleNumber } = req.body;
@@ -40,7 +37,7 @@ exports.registerUser = async (req, res) => {
     }
 
     const otp = generateOTP();
-    const otpExpire = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
+    const otpExpire = new Date(Date.now() + 10 * 60 * 1000);
 
     if (user && !user.isVerified) {
       user.name = name;
@@ -67,17 +64,25 @@ exports.registerUser = async (req, res) => {
       });
     }
 
-    await sendEmail({
-      email: user.email,
-      subject: '🔨 NirmanMitra - Registration OTP Verification',
-      message: `Hello ${user.name}, welcome to NirmanMitra! Use the OTP below to verify your account:`,
-      otp
-    });
+    // Send OTP to Email & Mobile SMS simultaneously
+    await Promise.allSettled([
+      sendEmail({
+        email: user.email,
+        subject: '🔨 NirmanMitra - Registration OTP',
+        message: `Hello ${user.name}, your verification OTP is:`,
+        otp
+      }),
+      sendSMS({
+        phone: user.phone,
+        otp
+      })
+    ]);
 
     res.status(200).json({
       success: true,
-      message: 'OTP sent to your email. Please verify to complete account setup.',
-      email: user.email
+      message: 'OTP sent to your email and mobile number.',
+      email: user.email,
+      phone: user.phone
     });
   } catch (err) {
     console.error('Registration Error:', err.message);
@@ -89,9 +94,7 @@ exports.registerUser = async (req, res) => {
   }
 };
 
-// @desc    Verify Registration OTP and activate account
-// @route   POST /api/auth/verify-register-otp
-// @access  Public
+// 2. VERIFY REGISTER OTP
 exports.verifyRegisterOTP = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -145,9 +148,7 @@ exports.verifyRegisterOTP = async (req, res) => {
   }
 };
 
-// @desc    Login user & get token
-// @route   POST /api/auth/login
-// @access  Public
+// 3. LOGIN USER
 exports.loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -179,7 +180,7 @@ exports.loginUser = async (req, res) => {
     if (!user.isVerified) {
       return res.status(403).json({
         success: false,
-        message: 'Account not verified. Please verify your email first.'
+        message: 'Account not verified. Please verify your OTP first.'
       });
     }
 
@@ -207,44 +208,53 @@ exports.loginUser = async (req, res) => {
   }
 };
 
-// @desc    Send OTP for password reset
-// @route   POST /api/auth/forgot-password
-// @access  Public
+// 4. FORGOT PASSWORD: Send OTP to Email & Phone
 exports.forgotPassword = async (req, res) => {
   try {
-    const { email } = req.body;
+    const { identifier } = req.body; // Can be email OR phone
 
-    if (!email) {
+    if (!identifier) {
       return res.status(400).json({
         success: false,
-        message: 'Please enter your email address'
+        message: 'Please provide your registered email or phone number'
       });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const cleanId = identifier.trim().toLowerCase();
+    const user = await User.findOne({
+      $or: [{ email: cleanId }, { phone: cleanId }]
+    });
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: 'No account found with this email'
+        message: 'No account found with this email or phone number'
       });
     }
 
     const otp = generateOTP();
     user.otp = otp;
-    user.otpExpire = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    user.otpExpire = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    await sendEmail({
-      email: user.email,
-      subject: '🔨 NirmanMitra - Password Reset OTP',
-      message: `Hello ${user.name}, you requested to reset your password. Use this OTP:`,
-      otp
-    });
+    await Promise.allSettled([
+      sendEmail({
+        email: user.email,
+        subject: '🔨 NirmanMitra - Password Reset OTP',
+        message: `Hello ${user.name}, your OTP to reset password is:`,
+        otp
+      }),
+      sendSMS({
+        phone: user.phone,
+        otp
+      })
+    ]);
 
     res.status(200).json({
       success: true,
-      message: 'Password reset OTP has been sent to your email'
+      message: 'Password reset OTP sent to registered email & phone',
+      email: user.email,
+      phone: user.phone
     });
   } catch (err) {
     console.error('Forgot Password Error:', err.message);
@@ -256,17 +266,15 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-// @desc    Reset password with verified OTP
-// @route   POST /api/auth/reset-password
-// @access  Public
+// 5. RESET PASSWORD WITH OTP
 exports.resetPassword = async (req, res) => {
   try {
-    const { email, otp, newPassword } = req.body;
+    const { identifier, otp, newPassword } = req.body;
 
-    if (!email || !otp || !newPassword) {
+    if (!identifier || !otp || !newPassword) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide email, OTP, and new password'
+        message: 'Please provide email/phone, OTP, and new password'
       });
     }
 
@@ -277,8 +285,9 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
+    const cleanId = identifier.trim().toLowerCase();
     const user = await User.findOne({
-      email: email.toLowerCase(),
+      $or: [{ email: cleanId }, { phone: cleanId }],
       otp: otp.trim(),
       otpExpire: { $gt: Date.now() }
     }).select('+password');
@@ -310,15 +319,11 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
-// @desc    Get current logged in user profile
-// @route   GET /api/auth/profile
-// @access  Protected
+// 6. PROFILE
 exports.getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     res.status(200).json({ success: true, user });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
