@@ -1,31 +1,48 @@
+// ============================================
+// NIRMANMITRA - EMAIL TRANSPORTER (FIXED FOR RENDER)
+// ============================================
+
 const nodemailer = require('nodemailer');
 
 const sendEmail = async (options) => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.warn('⚠️ EMAIL_USER or EMAIL_PASS environment variable is missing!');
+    return;
+  }
+
+  // Gmail SMTP Transport with TLS (Render Compatible)
   const transporter = nodemailer.createTransport({
     service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false, // Port 587 uses STARTTLS
     auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS // Gmail App Password
+      user: process.env.EMAIL_USER.trim(),
+      pass: process.env.EMAIL_PASS.replace(/\s+/g, '').trim()
+    },
+    tls: {
+      rejectUnauthorized: false
     }
   });
 
   const mailOptions = {
-    from: `"NirmanMitra Support" <${process.env.EMAIL_USER}>`,
+    from: `"NirmanMitra" <${process.env.EMAIL_USER.trim()}>`,
     to: options.email,
     subject: options.subject,
     html: `
-      <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; max-width: 500px;">
-        <h2 style="color: #ff6b00;">🔨 NirmanMitra</h2>
-        <p>${options.message}</p>
-        <div style="background: #f4f4f4; padding: 12px; font-size: 24px; font-weight: bold; letter-spacing: 5px; text-align: center; border-radius: 6px; color: #333;">
+      <div style="font-family: Arial, sans-serif; padding: 24px; border: 1px solid #e0e0e0; border-radius: 10px; max-width: 480px; margin: auto;">
+        <h2 style="color: #FF6B00; margin-bottom: 10px;">🔨 NirmanMitra</h2>
+        <p style="color: #333; font-size: 15px;">${options.message}</p>
+        <div style="background: #F4F5F7; padding: 16px; font-size: 28px; font-weight: bold; letter-spacing: 6px; text-align: center; border-radius: 8px; color: #111; margin: 20px 0;">
           ${options.otp}
         </div>
-        <p style="color: #777; font-size: 12px; margin-top: 20px;">This OTP is valid for 10 minutes. Do not share this with anyone.</p>
+        <p style="color: #888; font-size: 12px; margin-top: 15px;">This OTP is valid for 10 minutes. Never share this code with anyone.</p>
       </div>
     `
   };
 
-  await transporter.sendMail(mailOptions);
+  const info = await transporter.sendMail(mailOptions);
+  console.log('✅ Email sent successfully! MessageId:', info.messageId);
 };
 
 module.exports = sendEmail;
