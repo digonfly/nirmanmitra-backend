@@ -16,8 +16,32 @@ connectDB();
 // Create Express app
 const app = express();
 
-// Middleware
-app.use(cors());
+// Allowed Origins List
+const allowedOrigins = [
+  'https://nirmanmitra.onrender.com',
+  'https://nirmanmitra-frontend.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500'
+];
+
+// CORS Middleware Configuration
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, or Postman)
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Blocked by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Body Parsing Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -98,7 +122,7 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log('');
   console.log('╔════════════════════════════════════════╗');
-  console.log('║   🔨 NIRMANMITRA BACKEND SERVER 🔨    ║');
+  console.log('║   🔨 NIRMANMITRA BACKEND SERVER 🔨     ║');
   console.log('╚════════════════════════════════════════╝');
   console.log(`✅ Server running on: http://localhost:${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
