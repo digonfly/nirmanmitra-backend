@@ -1,156 +1,165 @@
 // ============================================
-// AUTHENTICATION CONTROLLER (FIXED)
+// NIRMANMITRA - AUTH CONTROLLER WITH OTP FLOW
 // ============================================
 
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const jwt = require('jsonwebtoken');
+const sendEmail = require('../utils/sendEmail');
 
+// Helper to generate 6 digit numeric OTP
+const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+// Helper to generate JWT Token
 const generateToken = (id) => {
-  return jwt.sign(
-    { id },
-    process.env.JWT_SECRET || 'nirmanmitra_secret_key_2025',
-    { expiresIn: '30d' }
-  );
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
+    expiresIn: '30d'
+  });
 };
 
-// REGISTER
-const registerUser = async (req, res) => {
+// @desc    Register user & send verification OTP
+// @route   POST /api/auth/register
+// @access  Public
+exports.registerUser = async (req, res) => {
   try {
-    console.log('📩 Register body:', req.body);
+    const { name, email, password, phone, role, storeName, vehicleNumber } = req.body;
 
-    let { name, email, password, phone, role, storeName, vehicleNumber, address } = req.body;
-
-    // Clean values
-    name = (name || '').trim();
-    email = (email || '').trim().toLowerCase();
-    password = (password || '').trim();
-    phone = (phone || '').trim();
-    role = (role || 'customer').toLowerCase();
-
-    // Validation
-    if (!name || name.length < 2) {
+    if (!name || !email || !password || !phone) {
       return res.status(400).json({
         success: false,
-        message: 'Please enter a valid name'
+        message: 'Please provide all required fields'
       });
     }
 
-    if (!email) {
+    let user = await User.findOne({ email: email.toLowerCase() });
+
+    if (user && user.isVerified) {
       return res.status(400).json({
         success: false,
-        message: 'Please enter an email address'
+        message: 'Account with this email already exists'
       });
     }
 
-    if (!password || password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: 'Password must be at least 6 characters'
+    const otp = generateOTP();
+    const otpExpire = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
+
+    if (user && !user.isVerified) {
+      user.name = name;
+      user.password = password;
+      user.phone = phone;
+      user.role = role || 'customer';
+      user.storeName = storeName || '';
+      user.vehicleNumber = vehicleNumber || '';
+      user.otp = otp;
+      user.otpExpire = otpExpire;
+      await user.save();
+    } else {
+      user = await User.create({
+        name,
+        email: email.toLowerCase(),
+        password,
+        phone,
+        role: role || 'customer',
+        storeName: storeName || '',
+        vehicleNumber: vehicleNumber || '',
+        otp,
+        otpExpire,
+        isVerified: false
       });
     }
 
-    if (!phone) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please enter a phone number'
-      });
-    }
-
-    // Valid roles only
-    const allowedRoles = ['customer', 'seller', 'delivery', 'admin'];
-    if (!allowedRoles.includes(role)) {
-      role = 'customer';
-    }
-
-    // Check existing user
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).json({
-        success: false,
-        message: 'An account with this email already exists. Please login.'
-      });
-    }
-
-    // Create user
-    const user = await User.create({
-      name,
-      email,
-      password,
-      phone,
-      role,
-      storeName: storeName || '',
-      vehicleNumber: vehicleNumber || '',
-      address: address || {
-        street: '',
-        city: '',
-        pincode: '',
-        state: ''
-      }
+    await sendEmail({
+      email: user.email,
+      subject: '🔨 NirmanMitra - Registration OTP Verification',
+      message: `Hello ${user.name}, welcome to NirmanMitra! Use the OTP below to verify your account:`,
+      otp
     });
+
+    res.status(200).json({
+      success: true,
+      message: 'OTP sent to your email. Please verify to complete account setup.',
+      email: user.email
+    });
+  } catch (err) {
+    console.error('Registration Error:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during registration',
+      error: err.message
+    });
+  }
+};
+
+// @desc    Verify Registration OTP and activate account
+// @route   POST /api/auth/verify-register-otp
+// @access  Public
+exports.verifyRegisterOTP = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide email and OTP'
+      });
+    }
+
+    const user = await User.findOne({
+      email: email.toLowerCase(),
+      otp: otp.trim(),
+      otpExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP'
+      });
+    }
+
+    user.isVerified = true;
+    user.otp = null;
+    user.otpExpire = null;
+    await user.save();
 
     const token = generateToken(user._id);
 
-    console.log('✅ User created:', user.email);
-
-    return res.status(201).json({
+    res.status(200).json({
       success: true,
-      message: 'Account created successfully 🎉',
+      message: 'Account verified successfully!',
       token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
         phone: user.phone,
-        role: user.role,
-        storeName: user.storeName,
-        vehicleNumber: user.vehicleNumber
+        role: user.role
       }
     });
-  } catch (error) {
-    console.error('❌ Registration Error:', error);
-
-    // Duplicate email
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email already registered. Please login.'
-      });
-    }
-
-    // Mongoose validation error
-    if (error.name === 'ValidationError') {
-      const msg = Object.values(error.errors).map(e => e.message).join(', ');
-      return res.status(400).json({
-        success: false,
-        message: msg || 'Validation failed'
-      });
-    }
-
-    return res.status(500).json({
+  } catch (err) {
+    console.error('OTP Verification Error:', err.message);
+    res.status(500).json({
       success: false,
-      message: 'Server Error during registration',
-      error: error.message
+      message: 'Server error during OTP verification',
+      error: err.message
     });
   }
 };
 
-// LOGIN
-const loginUser = async (req, res) => {
+// @desc    Login user & get token
+// @route   POST /api/auth/login
+// @access  Public
+exports.loginUser = async (req, res) => {
   try {
-    console.log('📩 Login body:', req.body);
-
-    let { email, password } = req.body;
-    email = (email || '').trim().toLowerCase();
-    password = (password || '').trim();
+    const { email, password } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide both email and password'
+        message: 'Please provide email and password'
       });
     }
 
-    const user = await User.findOne({ email }).select('+password');
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
 
     if (!user) {
       return res.status(401).json({
@@ -167,72 +176,151 @@ const loginUser = async (req, res) => {
       });
     }
 
+    if (!user.isVerified) {
+      return res.status(403).json({
+        success: false,
+        message: 'Account not verified. Please verify your email first.'
+      });
+    }
+
     const token = generateToken(user._id);
 
-    console.log('✅ Login success:', user.email);
-
-    return res.json({
+    res.status(200).json({
       success: true,
-      message: 'Logged in successfully ✅',
+      message: 'Login successful',
       token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
         phone: user.phone,
-        role: user.role,
-        storeName: user.storeName,
-        vehicleNumber: user.vehicleNumber,
-        address: user.address
+        role: user.role
       }
     });
-  } catch (error) {
-    console.error('❌ Login Error:', error);
-    return res.status(500).json({
+  } catch (err) {
+    console.error('Login Error:', err.message);
+    res.status(500).json({
       success: false,
-      message: 'Server Error during login',
-      error: error.message
+      message: 'Server error during login',
+      error: err.message
     });
   }
 };
 
-// PROFILE
-const getUserProfile = async (req, res) => {
+// @desc    Send OTP for password reset
+// @route   POST /api/auth/forgot-password
+// @access  Public
+exports.forgotPassword = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please enter your email address'
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: 'User profile not found'
+        message: 'No account found with this email'
       });
     }
 
-    return res.json({
-      success: true,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        storeName: user.storeName,
-        vehicleNumber: user.vehicleNumber,
-        address: user.address,
-        createdAt: user.createdAt
-      }
+    const otp = generateOTP();
+    user.otp = otp;
+    user.otpExpire = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    await user.save();
+
+    await sendEmail({
+      email: user.email,
+      subject: '🔨 NirmanMitra - Password Reset OTP',
+      message: `Hello ${user.name}, you requested to reset your password. Use this OTP:`,
+      otp
     });
-  } catch (error) {
-    return res.status(500).json({
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset OTP has been sent to your email'
+    });
+  } catch (err) {
+    console.error('Forgot Password Error:', err.message);
+    res.status(500).json({
       success: false,
-      message: 'Server Error retrieving profile',
-      error: error.message
+      message: 'Failed to send reset OTP',
+      error: err.message
     });
   }
 };
 
-module.exports = {
-  registerUser,
-  loginUser,
-  getUserProfile
+// @desc    Reset password with verified OTP
+// @route   POST /api/auth/reset-password
+// @access  Public
+exports.resetPassword = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide email, OTP, and new password'
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters'
+      });
+    }
+
+    const user = await User.findOne({
+      email: email.toLowerCase(),
+      otp: otp.trim(),
+      otpExpire: { $gt: Date.now() }
+    }).select('+password');
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP'
+      });
+    }
+
+    user.password = newPassword;
+    user.otp = null;
+    user.otpExpire = null;
+    user.isVerified = true;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successfully! You can now log in.'
+    });
+  } catch (err) {
+    console.error('Reset Password Error:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during password reset',
+      error: err.message
+    });
+  }
+};
+
+// @desc    Get current logged in user profile
+// @route   GET /api/auth/profile
+// @access  Protected
+exports.getProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    res.status(200).json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 };

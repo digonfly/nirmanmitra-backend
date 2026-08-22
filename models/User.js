@@ -1,5 +1,5 @@
 // ============================================
-// USER MODEL (FIXED FOR MONGOOSE)
+// NIRMANMITRA - USER MODEL WITH OTP & AUTH
 // ============================================
 
 const mongoose = require('mongoose');
@@ -52,6 +52,14 @@ const userSchema = new mongoose.Schema(
     isVerified: {
       type: Boolean,
       default: false
+    },
+    otp: {
+      type: String,
+      default: null
+    },
+    otpExpire: {
+      type: Date,
+      default: null
     }
   },
   {
@@ -59,7 +67,7 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Hash password before save (Async without 'next')
+// Hash password before save
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) {
     return;
