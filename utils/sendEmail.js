@@ -1,8 +1,14 @@
 // ============================================
-// NIRMANMITRA - EMAIL TRANSPORTER (FORCE IPV4)
+// NIRMANMITRA - EMAIL TRANSPORTER (STRICT IPV4)
 // ============================================
 
 const nodemailer = require('nodemailer');
+const dns = require('dns');
+
+// Force DNS lookup to return only IPv4 addresses
+const customDnsLookup = (hostname, options, callback) => {
+  return dns.lookup(hostname, { family: 4, all: false }, callback);
+};
 
 const sendEmail = async (options) => {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
@@ -10,12 +16,11 @@ const sendEmail = async (options) => {
     return;
   }
 
-  // Gmail SMTP with explicit IPv4 family
   const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
     secure: false, // STARTTLS
-    family: 4,     // <--- FORCE IPV4 (Fixes ENETUNREACH on Render)
+    lookup: customDnsLookup, // Strictly bypass IPv6 on Render
     auth: {
       user: process.env.EMAIL_USER.trim(),
       pass: process.env.EMAIL_PASS.replace(/\s+/g, '').trim()
